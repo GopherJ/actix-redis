@@ -7,18 +7,23 @@ use log::{error, info, warn};
 
 use bb8_redis::{
     bb8,
-    redis::{cmd, ErrorKind, RedisError, RedisResult, Value as RedisValue},
+    redis::{cmd, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value as RedisValue},
     RedisConnectionManager, RedisPool,
 };
 
-pub enum RedisCmd {
-    Set(String, String),
-    SetWithEx(String, String, i64),
+pub enum RedisCmd<T: ToRedisArgs> {
+    Set(String, T),
+    SetEx(String, String, T),
+    SetNx(String, String),
     Get(String),
     Del(String),
+    Hget(String, String),
+    Hset(String, String, T),
+    HsetNx(String, String, T),
+    Hincrby(String, String, T),
 }
 
-impl Message for RedisCmd {
+impl<T: ToRedisArgs + Unpin + 'static> Message for RedisCmd<T> {
     type Result = RedisResult<RedisValue>;
 }
 
@@ -83,10 +88,10 @@ impl Supervised for RedisClient {
     }
 }
 
-impl Handler<RedisCmd> for RedisClient {
+impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
     type Result = ResponseActFuture<Self, RedisResult<RedisValue>>;
 
-    fn handle(&mut self, msg: RedisCmd, _: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: RedisCmd<T>, _: &mut Self::Context) -> Self::Result {
         if let Some(ref pool) = self.pool {
             let pool = pool.clone();
 
@@ -106,12 +111,42 @@ impl Handler<RedisCmd> for RedisClient {
                     RedisCmd::Get(key) => cmd("GET").arg(key).query_async(conn).await,
                     RedisCmd::Del(key) => cmd("DEL").arg(key).query_async(conn).await,
                     RedisCmd::Set(key, val) => cmd("SET").arg(key).arg(val).query_async(conn).await,
-                    RedisCmd::SetWithEx(key, val, ttl) => {
+                    RedisCmd::SetEx(key, val, ttl) => {
                         cmd("SET")
                             .arg(key)
                             .arg(val)
                             .arg("EX")
                             .arg(ttl)
+                            .query_async(conn)
+                            .await
+                    }
+                    RedisCmd::SetNx(key, val) => {
+                        cmd("SETNX").arg(key).arg(val).query_async(conn).await
+                    }
+                    RedisCmd::Hget(key, field) => {
+                        cmd("HGET").arg(key).arg(field).query_async(conn).await
+                    }
+                    RedisCmd::Hset(key, field, val) => {
+                        cmd("HSET")
+                            .arg(key)
+                            .arg(field)
+                            .arg(val)
+                            .query_async(conn)
+                            .await
+                    }
+                    RedisCmd::HsetNx(key, field, val) => {
+                        cmd("HSETNX")
+                            .arg(key)
+                            .arg(field)
+                            .arg(val)
+                            .query_async(conn)
+                            .await
+                    }
+                    RedisCmd::Hincrby(key, field, val) => {
+                        cmd("HINCRBY")
+                            .arg(key)
+                            .arg(field)
+                            .arg(val)
                             .query_async(conn)
                             .await
                     }
