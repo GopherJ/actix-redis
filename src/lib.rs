@@ -14,13 +14,23 @@ use bb8_redis::{
 pub enum RedisCmd<T: ToRedisArgs> {
     Set(String, T),
     SetEx(String, String, T),
-    SetNx(String, String),
+    SetNx(String, T),
     Get(String),
     Del(String),
     Hget(String, String),
     Hset(String, String, T),
     HsetNx(String, String, T),
     Hincrby(String, String, T),
+    Hdel(String, String),
+    Sadd(String, T),
+    Scard(String),
+    Smembers(String),
+    Sismember(String, T),
+    Srem(String, T),
+    Zadd(String, T, T),
+    Zrem(String, T),
+    Zcard(String),
+    Zrangebyscore(String, T, T, T, T),
 }
 
 impl<T: ToRedisArgs + Unpin + 'static> Message for RedisCmd<T> {
@@ -147,6 +157,43 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                             .arg(key)
                             .arg(field)
                             .arg(val)
+                            .query_async(conn)
+                            .await
+                    }
+                    RedisCmd::Hdel(key, field) => {
+                        cmd("HDEL").arg(key).arg(field).query_async(conn).await
+                    }
+                    RedisCmd::Sadd(key, val) => {
+                        cmd("SADD").arg(key).arg(val).query_async(conn).await
+                    }
+                    RedisCmd::Smembers(key) => cmd("SMEMBERS").arg(key).query_async(conn).await,
+                    RedisCmd::Sismember(key, val) => {
+                        cmd("SMEMBERS").arg(key).arg(val).query_async(conn).await
+                    }
+                    RedisCmd::Scard(key) => cmd("SCARD").arg(key).query_async(conn).await,
+                    RedisCmd::Srem(key, val) => {
+                        cmd("SREM").arg(key).arg(val).query_async(conn).await
+                    }
+                    RedisCmd::Zadd(key, score, val) => {
+                        cmd("ZADD")
+                            .arg(key)
+                            .arg(score)
+                            .arg(val)
+                            .query_async(conn)
+                            .await
+                    }
+                    RedisCmd::Zrem(key, val) => {
+                        cmd("ZREM").arg(key).arg(val).query_async(conn).await
+                    }
+                    RedisCmd::Zcard(key) => cmd("ZCARD").arg(key).query_async(conn).await,
+                    RedisCmd::Zrangebyscore(key, score_start, score_end, offset, count) => {
+                        cmd("ZRANGEBYSCORE")
+                            .arg(key)
+                            .arg(score_start)
+                            .arg(score_end)
+                            .arg("LIMIT")
+                            .arg(offset)
+                            .arg(count)
                             .query_async(conn)
                             .await
                     }
