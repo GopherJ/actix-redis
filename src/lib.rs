@@ -11,7 +11,12 @@ use bb8_redis::{
     RedisConnectionManager, RedisPool,
 };
 use log::{error, info, warn};
-use redis_async::{
+
+pub mod redis_async {
+    pub use redis_async::*;
+}
+
+use self::redis_async::{
     client::pubsub::PubsubStream,
     client::{pubsub_connect, PubsubConnection},
     error::Error,
