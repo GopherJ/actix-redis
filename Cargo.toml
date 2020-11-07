@@ -9,7 +9,9 @@ version     = "0.1.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix     = "0.10.0"
-backoff   = "0.2.1"
-bb8-redis = "0.5.0"
-log       = "0.4.11"
+actix       = "0.10.0"
+backoff     = "0.2.1"
+bb8-redis   = "0.5.0"
+log         = "0.4.11"
+redis-async = { git = "https://github.com/GopherJ/redis-async-rs", rev = "011a12" }
+futures = "0.3.7"
