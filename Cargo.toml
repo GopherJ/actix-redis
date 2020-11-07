@@ -1,8 +1,10 @@
 [package]
-authors = ["Cheng JIANG <jiang.cheng@vip.163.com>"]
-edition = "2018"
-name    = "actix-redis"
-version = "0.1.2"
+authors     = ["Cheng JIANG <jiang.cheng@vip.163.com>"]
+description = "Redis Actor"
+edition     = "2018"
+license     = "MIT"
+name        = "redis-actor"
+version     = "0.1.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
