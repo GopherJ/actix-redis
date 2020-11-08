@@ -214,9 +214,9 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                     err(res_err)
                 }
             });
-            Box::pin(res)
+            Box::new(res)
         } else {
-            Box::pin(err(RedisError::from((ErrorKind::IoError, "Not connected"))))
+            Box::new(err(RedisError::from((ErrorKind::IoError, "Not connected"))))
         }
     }
 }
