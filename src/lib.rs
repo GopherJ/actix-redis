@@ -63,19 +63,21 @@ pub struct RedisClient {
 }
 
 impl RedisClient {
-    pub fn start<S: Into<String>>(
+    pub fn new<S: Into<String>, A: Into<SocketAddr>>(
         url: S,
+        addr: A,
         sub_topics: Option<Vec<String>>,
         psub_topics: Option<Vec<String>>,
         stream_handler_fn: Option<StreamHandlerFn>,
     ) -> Addr<RedisClient> {
         let url = url.into();
+        let addr = addr.into();
 
         let mut backoff = ExponentialBackoff::default();
         backoff.max_elapsed_time = None;
 
         Supervisor::start(move |_| RedisClient {
-            addr: url.parse().unwrap(),
+            addr,
             url,
             backoff,
             pool: None,
