@@ -5,7 +5,11 @@ use actix::{
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use log::{error, info, warn};
 
-use bb8_redis::{
+pub mod bb8_redis {
+    pub use bb8_redis::*;
+}
+
+pub use self::bb8_redis::{
     bb8,
     redis::{cmd, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value as RedisValue},
     RedisConnectionManager, RedisPool,
