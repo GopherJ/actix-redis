@@ -44,17 +44,17 @@ pub struct RedisClient {
 }
 
 impl RedisClient {
-    pub fn start<S: Into<String>>(addr: S) -> Addr<RedisClient> {
+    pub fn new<S: Into<String>>(addr: S) -> RedisClient {
         let addr = addr.into();
 
         let mut backoff = ExponentialBackoff::default();
         backoff.max_elapsed_time = None;
 
-        Supervisor::start(|_| RedisClient {
+        RedisClient {
             addr,
             backoff,
             pool: None,
-        })
+        }
     }
 }
 
