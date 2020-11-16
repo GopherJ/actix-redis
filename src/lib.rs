@@ -4,6 +4,9 @@ use actix::{
 };
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use log::{error, info, warn};
+use serde::{de::DeserializeOwned, ser::Serialize};
+
+use std::marker::PhantomData;
 
 pub mod bb8_redis {
     pub use bb8_redis::*;
@@ -11,34 +14,39 @@ pub mod bb8_redis {
 
 pub use self::bb8_redis::{
     bb8,
-    redis::{cmd, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value as RedisValue},
+    redis::{
+        cmd, ErrorKind, FromRedisValue, RedisError, RedisResult, ToRedisArgs, Value as RedisValue,
+    },
     RedisConnectionManager, RedisPool,
 };
 
-pub enum RedisCmd<T: ToRedisArgs> {
+pub enum RedisCmd<T: Serialize, R: DeserializeOwned> {
     Set(String, T),
-    SetEx(String, String, T),
+    SetEx(String, T, usize),
     SetNx(String, T),
     Get(String),
     Del(String),
     Hget(String, String),
     Hset(String, String, T),
     HsetNx(String, String, T),
-    Hincrby(String, String, T),
+    Hincrby(String, String, i64),
     Hdel(String, String),
     Sadd(String, T),
     Scard(String),
     Smembers(String),
     Sismember(String, T),
     Srem(String, T),
-    Zadd(String, T, T),
+    Zadd(String, i64, T),
     Zrem(String, T),
     Zcard(String),
-    Zrangebyscore(String, T, T, T, T),
+    Zrangebyscore(String, i64, i64, usize, usize),
+    Private(PhantomData<R>),
 }
 
-impl<T: ToRedisArgs + Unpin + 'static> Message for RedisCmd<T> {
-    type Result = RedisResult<RedisValue>;
+impl<T: Serialize + Unpin + 'static, R: DeserializeOwned + Unpin + 'static> Message
+    for RedisCmd<T, R>
+{
+    type Result = RedisResult<R>;
 }
 
 pub struct RedisClient {
@@ -102,10 +110,28 @@ impl Supervised for RedisClient {
     }
 }
 
-impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
-    type Result = ResponseActFuture<Self, RedisResult<RedisValue>>;
+macro_rules! to_redis_args {
+    ($val:ident) => {
+        serde_json::to_string(&$val).map_err(|_| {
+            RedisError::from((ErrorKind::IoError, "Not able to serialize as redis args"))
+        })?
+    };
+}
 
-    fn handle(&mut self, msg: RedisCmd<T>, _: &mut Self::Context) -> Self::Result {
+macro_rules! from_redis_value {
+    ($val:ident) => {
+        serde_json::from_str(&$val).map_err(|_| {
+            RedisError::from((ErrorKind::IoError, "Not able to deserialize as redis value"))
+        })
+    };
+}
+
+impl<T: Serialize + Unpin + 'static, R: DeserializeOwned + Unpin + 'static> Handler<RedisCmd<T, R>>
+    for RedisClient
+{
+    type Result = ResponseActFuture<Self, RedisResult<R>>;
+
+    fn handle(&mut self, msg: RedisCmd<T, R>, _: &mut Self::Context) -> Self::Result {
         if let Some(ref pool) = self.pool {
             let pool = pool.clone();
 
@@ -124,18 +150,28 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                 match msg {
                     RedisCmd::Get(key) => cmd("GET").arg(key).query_async(conn).await,
                     RedisCmd::Del(key) => cmd("DEL").arg(key).query_async(conn).await,
-                    RedisCmd::Set(key, val) => cmd("SET").arg(key).arg(val).query_async(conn).await,
+                    RedisCmd::Set(key, val) => {
+                        cmd("SET")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
+                    }
                     RedisCmd::SetEx(key, val, ttl) => {
                         cmd("SET")
                             .arg(key)
-                            .arg(val)
+                            .arg(to_redis_args!(val))
                             .arg("EX")
                             .arg(ttl)
                             .query_async(conn)
                             .await
                     }
                     RedisCmd::SetNx(key, val) => {
-                        cmd("SETNX").arg(key).arg(val).query_async(conn).await
+                        cmd("SETNX")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
                     }
                     RedisCmd::Hget(key, field) => {
                         cmd("HGET").arg(key).arg(field).query_async(conn).await
@@ -144,7 +180,7 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                         cmd("HSET")
                             .arg(key)
                             .arg(field)
-                            .arg(val)
+                            .arg(to_redis_args!(val))
                             .query_async(conn)
                             .await
                     }
@@ -152,7 +188,7 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                         cmd("HSETNX")
                             .arg(key)
                             .arg(field)
-                            .arg(val)
+                            .arg(to_redis_args!(val))
                             .query_async(conn)
                             .await
                     }
@@ -168,26 +204,42 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                         cmd("HDEL").arg(key).arg(field).query_async(conn).await
                     }
                     RedisCmd::Sadd(key, val) => {
-                        cmd("SADD").arg(key).arg(val).query_async(conn).await
+                        cmd("SADD")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
                     }
                     RedisCmd::Smembers(key) => cmd("SMEMBERS").arg(key).query_async(conn).await,
                     RedisCmd::Sismember(key, val) => {
-                        cmd("SMEMBERS").arg(key).arg(val).query_async(conn).await
+                        cmd("SMEMBERS")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
                     }
                     RedisCmd::Scard(key) => cmd("SCARD").arg(key).query_async(conn).await,
                     RedisCmd::Srem(key, val) => {
-                        cmd("SREM").arg(key).arg(val).query_async(conn).await
+                        cmd("SREM")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
                     }
                     RedisCmd::Zadd(key, score, val) => {
                         cmd("ZADD")
                             .arg(key)
                             .arg(score)
-                            .arg(val)
+                            .arg(to_redis_args!(val))
                             .query_async(conn)
                             .await
                     }
                     RedisCmd::Zrem(key, val) => {
-                        cmd("ZREM").arg(key).arg(val).query_async(conn).await
+                        cmd("ZREM")
+                            .arg(key)
+                            .arg(to_redis_args!(val))
+                            .query_async(conn)
+                            .await
                     }
                     RedisCmd::Zcard(key) => cmd("ZCARD").arg(key).query_async(conn).await,
                     RedisCmd::Zrangebyscore(key, score_start, score_end, offset, count) => {
@@ -201,10 +253,13 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
                             .query_async(conn)
                             .await
                     }
+                    RedisCmd::Private(_) => panic!("Private command. It should only be used internally for specifing return value's type"),
                 }
             }
             .into_actor(self)
-            .then(|res, act, ctx| match res {
+            .then(|res, act, ctx| match res
+            .and_then(|v: RedisValue| String::from_redis_value(&v))
+            .and_then(|payload: String| from_redis_value!(payload)) {
                 Ok(res_ok) => ok(res_ok),
                 Err(res_err) => {
                     if res_err.is_io_error() {
