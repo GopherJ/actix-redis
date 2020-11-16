@@ -17,44 +17,44 @@ pub use self::bb8_redis::{
 
 pub enum RedisCmd<T: ToRedisArgs> {
     Set(String, T),
-    SetEx(String, String, T),
+    SetEx(String, T, usize),
     SetNx(String, T),
     Get(String),
     Del(String),
     Hget(String, String),
     Hset(String, String, T),
     HsetNx(String, String, T),
-    Hincrby(String, String, T),
+    Hincrby(String, String, i64),
     Hdel(String, String),
     Sadd(String, T),
     Scard(String),
     Smembers(String),
     Sismember(String, T),
     Srem(String, T),
-    Zadd(String, T, T),
+    Zadd(String, i64, T),
     Zrem(String, T),
     Zcard(String),
-    Zrangebyscore(String, T, T, T, T),
+    Zrangebyscore(String, i64, i64, usize, usize),
 }
 
 impl<T: ToRedisArgs + Unpin + 'static> Message for RedisCmd<T> {
     type Result = RedisResult<RedisValue>;
 }
 
-pub struct RedisClient {
+pub struct RedisActor {
     addr: String,
     backoff: ExponentialBackoff,
     pool: Option<RedisPool>,
 }
 
-impl RedisClient {
-    pub fn new<S: Into<String>>(addr: S) -> RedisClient {
+impl RedisActor {
+    pub fn new<S: Into<String>>(addr: S) -> RedisActor {
         let addr = addr.into();
 
         let mut backoff = ExponentialBackoff::default();
         backoff.max_elapsed_time = None;
 
-        RedisClient {
+        RedisActor {
             addr,
             backoff,
             pool: None,
@@ -62,7 +62,7 @@ impl RedisClient {
     }
 }
 
-impl Actor for RedisClient {
+impl Actor for RedisActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Context<Self>) {
@@ -96,13 +96,13 @@ impl Actor for RedisClient {
     }
 }
 
-impl Supervised for RedisClient {
+impl Supervised for RedisActor {
     fn restarting(&mut self, _: &mut Self::Context) {
         self.pool.take();
     }
 }
 
-impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisClient {
+impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
     type Result = ResponseActFuture<Self, RedisResult<RedisValue>>;
 
     fn handle(&mut self, msg: RedisCmd<T>, _: &mut Self::Context) -> Self::Result {
