@@ -23,6 +23,8 @@ pub enum RedisCmd<T: ToRedisArgs> {
     Del(String),
     Hget(String, String),
     Hset(String, String, T),
+    Hkeys(String),
+    Hexists(String, String),
     HsetNx(String, String, T),
     Hincrby(String, String, i64),
     Hdel(String, String),
@@ -147,6 +149,14 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
                             .arg(key)
                             .arg(field)
                             .arg(val)
+                            .query_async(&mut *conn)
+                            .await
+                    }
+                    RedisCmd::Hkeys(key) => cmd("HKEYS").arg(key).query_async(&mut *conn).await,
+                    RedisCmd::Hexists(key, field) => {
+                        cmd("HEXISTS")
+                            .arg(key)
+                            .arg(field)
                             .query_async(&mut *conn)
                             .await
                     }
