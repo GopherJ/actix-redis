@@ -12,7 +12,7 @@ pub mod bb8_redis {
 pub use self::bb8_redis::{
     bb8,
     redis::{cmd, ErrorKind, RedisError, RedisResult, ToRedisArgs, Value as RedisValue},
-    RedisConnectionManager, RedisPool,
+    RedisConnectionManager,
 };
 
 pub enum RedisCmd<T: ToRedisArgs> {
@@ -44,7 +44,7 @@ impl<T: ToRedisArgs + Unpin + 'static> Message for RedisCmd<T> {
 pub struct RedisActor {
     addr: String,
     backoff: ExponentialBackoff,
-    pool: Option<RedisPool>,
+    pool: Option<bb8::Pool<RedisConnectionManager>>,
 }
 
 impl RedisActor {
@@ -74,7 +74,7 @@ impl Actor for RedisActor {
                     .map(|res, act, ctx| match res {
                         Ok(pool) => {
                             info!("Connected to redis_client server: {}", act.addr);
-                            act.pool = Some(RedisPool::new(pool));
+                            act.pool = Some(pool);
                             act.backoff.reset();
                         }
                         Err(err) => {
@@ -116,36 +116,38 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
                         "Not able to acquire connection from pool",
                     ))
                 })?;
-                let conn = conn.as_mut().ok_or(RedisError::from((
-                    ErrorKind::IoError,
-                    "Not able to acquire connection from pool",
-                )))?;
 
                 match msg {
-                    RedisCmd::Get(key) => cmd("GET").arg(key).query_async(conn).await,
-                    RedisCmd::Del(key) => cmd("DEL").arg(key).query_async(conn).await,
-                    RedisCmd::Set(key, val) => cmd("SET").arg(key).arg(val).query_async(conn).await,
+                    RedisCmd::Get(key) => cmd("GET").arg(key).query_async(&mut *conn).await,
+                    RedisCmd::Del(key) => cmd("DEL").arg(key).query_async(&mut *conn).await,
+                    RedisCmd::Set(key, val) => {
+                        cmd("SET").arg(key).arg(val).query_async(&mut *conn).await
+                    }
                     RedisCmd::SetEx(key, val, ttl) => {
                         cmd("SET")
                             .arg(key)
                             .arg(val)
                             .arg("EX")
                             .arg(ttl)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                     RedisCmd::SetNx(key, val) => {
-                        cmd("SETNX").arg(key).arg(val).query_async(conn).await
+                        cmd("SETNX").arg(key).arg(val).query_async(&mut *conn).await
                     }
                     RedisCmd::Hget(key, field) => {
-                        cmd("HGET").arg(key).arg(field).query_async(conn).await
+                        cmd("HGET")
+                            .arg(key)
+                            .arg(field)
+                            .query_async(&mut *conn)
+                            .await
                     }
                     RedisCmd::Hset(key, field, val) => {
                         cmd("HSET")
                             .arg(key)
                             .arg(field)
                             .arg(val)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                     RedisCmd::HsetNx(key, field, val) => {
@@ -153,7 +155,7 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
                             .arg(key)
                             .arg(field)
                             .arg(val)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                     RedisCmd::Hincrby(key, field, val) => {
@@ -161,35 +163,45 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
                             .arg(key)
                             .arg(field)
                             .arg(val)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                     RedisCmd::Hdel(key, field) => {
-                        cmd("HDEL").arg(key).arg(field).query_async(conn).await
+                        cmd("HDEL")
+                            .arg(key)
+                            .arg(field)
+                            .query_async(&mut *conn)
+                            .await
                     }
                     RedisCmd::Sadd(key, val) => {
-                        cmd("SADD").arg(key).arg(val).query_async(conn).await
+                        cmd("SADD").arg(key).arg(val).query_async(&mut *conn).await
                     }
-                    RedisCmd::Smembers(key) => cmd("SMEMBERS").arg(key).query_async(conn).await,
+                    RedisCmd::Smembers(key) => {
+                        cmd("SMEMBERS").arg(key).query_async(&mut *conn).await
+                    }
                     RedisCmd::Sismember(key, val) => {
-                        cmd("SMEMBERS").arg(key).arg(val).query_async(conn).await
+                        cmd("SMEMBERS")
+                            .arg(key)
+                            .arg(val)
+                            .query_async(&mut *conn)
+                            .await
                     }
-                    RedisCmd::Scard(key) => cmd("SCARD").arg(key).query_async(conn).await,
+                    RedisCmd::Scard(key) => cmd("SCARD").arg(key).query_async(&mut *conn).await,
                     RedisCmd::Srem(key, val) => {
-                        cmd("SREM").arg(key).arg(val).query_async(conn).await
+                        cmd("SREM").arg(key).arg(val).query_async(&mut *conn).await
                     }
                     RedisCmd::Zadd(key, score, val) => {
                         cmd("ZADD")
                             .arg(key)
                             .arg(score)
                             .arg(val)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                     RedisCmd::Zrem(key, val) => {
-                        cmd("ZREM").arg(key).arg(val).query_async(conn).await
+                        cmd("ZREM").arg(key).arg(val).query_async(&mut *conn).await
                     }
-                    RedisCmd::Zcard(key) => cmd("ZCARD").arg(key).query_async(conn).await,
+                    RedisCmd::Zcard(key) => cmd("ZCARD").arg(key).query_async(&mut *conn).await,
                     RedisCmd::Zrangebyscore(key, score_start, score_end, offset, count) => {
                         cmd("ZRANGEBYSCORE")
                             .arg(key)
@@ -198,7 +210,7 @@ impl<T: ToRedisArgs + Unpin + 'static> Handler<RedisCmd<T>> for RedisActor {
                             .arg("LIMIT")
                             .arg(offset)
                             .arg(count)
-                            .query_async(conn)
+                            .query_async(&mut *conn)
                             .await
                     }
                 }
